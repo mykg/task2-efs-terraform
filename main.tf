@@ -22,9 +22,9 @@ resource "local_file" "deploy-key" {
 }
 
 # creating a SG
-resource "aws_security_group" "allow_ssh_http" {
-  name        = "allow_ssh_http"
-  description = "Allow ssh and http inbound traffic"
+resource "aws_security_group" "allow_ssh_http_nfs" {
+  name        = "allow_ssh_http_nfs"
+  description = "Allow ssh and http and nfs inbound traffic"
   
   ingress {
     description = "ssh"
@@ -40,6 +40,12 @@ resource "aws_security_group" "allow_ssh_http" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  ingress {
+    description = "NFS"
+    from_port	= 2049
+    to_port	= 2049
+    protocol	= "tcp"
+    cidr_blocks	= ["0.0.0.0/0"]
 
   egress {
     from_port   = 0
@@ -49,7 +55,7 @@ resource "aws_security_group" "allow_ssh_http" {
   }
 
   tags = {
-    Name = "allow_ssh_http"
+    Name = "allow_ssh_http_nfs"
   }
 }
 
@@ -59,7 +65,7 @@ resource "aws_instance" "myin" {
   ami  = "ami-0447a12f28fddb066"
   instance_type = "t2.micro"
   key_name = aws_key_pair.generated_key.key_name
-  security_groups = [ "allow_ssh_http" ]
+  security_groups = [ "allow_ssh_http_nfs" ]
   
 
   connection {
@@ -71,7 +77,7 @@ resource "aws_instance" "myin" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo yum install httpd  php git amazon-efs-utils -y",
+      "sudo yum install httpd  php git amazon-efs-utils nfs-utils -y",
       "sudo systemctl restart httpd",
       "sudo systemctl enable httpd",
     ]
@@ -84,6 +90,9 @@ resource "aws_instance" "myin" {
 
 # efs 
 resource "aws_efs_file_system" "efs" {
+  depends_on = [
+    aws_instance.myin,
+    aws_security_group.allow_ssh_http_nfs, ]
   creation_token = "my-product"
   
   tags = {
@@ -138,12 +147,14 @@ resource "aws_efs_mount_target" "alpha" {
   subnet_id = aws_instance.myin.subnet_id
   security_groups = [ aws_security_group.allow_ssh_http.id ]
   depends_on = [ aws_efs_file_system.efs, 
-                 aws_efs_access_point.ap, ]
+                 aws_efs_access_point.ap, 
+                 aws_efs_file_system_policy.policy,]
 }
 
 resource "null_resource" "nullremote1"  {
   depends_on = [
     aws_efs_mount_target.alpha,
+    aws_efs_file_system_policy.policy,
   ]
 
   connection {
